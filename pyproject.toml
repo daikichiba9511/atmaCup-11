@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "atma_11"
+version = "0.1.0"
+description = ""
+authors = ["daikichiba9511 <daikichiba.tech.ml@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

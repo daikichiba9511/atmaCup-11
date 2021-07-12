@@ -1,11 +1,10 @@
 config.sh
-
 input
-
-exp/utils.py
-
+utils.py
 exp/__pycache__
-
 wandb
-
 output
+.vscode
+*.ipynb
+lightning_logs
+__pycache__

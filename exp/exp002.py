@@ -1,7 +1,15 @@
-""" exp001
+""" exp002
 
-* MADGRAD
-* RandomCrop
+* Self-Supervised Learning by lightning bolts
+* Simsiam
+
+Reference
+
+* https://arxiv.org/abs/2011.10566
+* https://github.com/PyTorchLightning/Lightning-Bolts/blob/master/pl_bolts/models/self_supervised/simsiam/simsiam_module.py#L19-L268
+* https://www.guruguru.science/competitions/17/discussions/a39d588e-aff2-4728-8323-b07f15563552/
+* https://speakerdeck.com/sansandsoc/simsiam-exploring-simple-siamese-representation-learning
+
 """
 # ====================
 # package
@@ -22,6 +30,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+
 # import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
@@ -30,17 +39,23 @@ from albumentations.pytorch import ToTensorV2
 from loguru import logger
 from madgrad import MADGRAD
 from PIL import Image
+from pl_bolts.models.self_supervised import SimSiam
+from pl_bolts.models.self_supervised.simclr import (
+    SimCLREvalDataTransform,
+    SimCLRTrainDataTransform,
+)
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.trainer.callback_hook import TrainerCallbackHookMixin
 from sklearn import model_selection
+from torch._C import dtype
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.models import resnet
-from torchvision.transforms.transforms import ColorJitter
 
 sys.path.append(os.getcwd())
-import utils
+from src import utils
 
 # from torch.utils.data import DataLoader, Dataset
 
@@ -116,6 +131,7 @@ class Atma11Dataset(Dataset):
         df: pd.core.frame.DataFrame,
         img_size: Tuple[int, int],
         is_test: bool = False,
+        is_valid: bool = False,
         fp16: bool = False,
     ) -> None:
         self.data_dir = Path(".") / "input" / "atmacup-11"
@@ -123,13 +139,14 @@ class Atma11Dataset(Dataset):
         self.df = df
         self.dtype = torch.float32 if not fp16 else torch.float16
         self.is_test = is_test
+        self.is_valid = is_valid
 
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx) -> Dict[str, Any]:
+    def __getitem__(self, idx):
         img_id = self.df["object_id"][idx]
-        image = self.get_image(img_id + ".jpg").to(dtype=self.dtype)
+        image = self.get_image(img_id + ".jpg")
         """
         logger.debug(
             f"shape of labels : {labels.detach().cpu().shape}\n"
@@ -139,18 +156,26 @@ class Atma11Dataset(Dataset):
         if self.is_test:
             return {"object_id": img_id, "image": image}
         else:
+            image = [image[i].to(dtype=self.dtype) for i in range(len(image))]
             labels = torch.tensor(self.df["target"][idx], dtype=self.dtype)
-            return {
-                "object_id": img_id,
-                "target": labels,
-                "image": image,
-            }
+            return image, labels
 
-    def get_image(self, img_path: str) -> torch.Tensor:
-        img = cv2.imread(str(self.data_dir / "image" / img_path))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = self.get_preprocess()(image=img)["image"]
+    def get_image(self, img_path: str):
+        transform = self.get_transform_simclr()
+        img = Image.open(str(self.data_dir / "image" / img_path))
+        img = img.convert("RGB")
+        img = transform(img)
         return img
+
+    def get_transform_simclr(self):
+        if self.is_valid:
+            return SimCLREvalDataTransform(input_height=self.size[0])
+        elif self.is_test:
+            # do nothing
+            return lambda x: x
+
+        else:
+            return SimCLRTrainDataTransform(input_height=self.size[0])
 
     def get_preprocess(self):
         return A.Compose(
@@ -233,6 +258,7 @@ class MyDataModule(pl.LightningDataModule):
             df=self.get_df(phase=phase),
             is_test=(phase == "test"),
             img_size=self.img_size,
+            is_valid=(phase == "valid"),
         )
         return dataset
 
@@ -407,18 +433,210 @@ def make_sub(preds_df: pd.core.frame.DataFrame, n_fold: int, output_dir: str) ->
 
 
 def make_predict(path: str, config: Config) -> Dict[str, np.ndarray]:
-    """
-
-    TODO:
-        * hackしてる感じがあるので正しく設定して正しく使えるようにしておく(setupとか)
-    """
+    """ """
     debug = config.debug
     fp16 = config.fp16
     epochs = config.epochs
 
     logger.info("predict start")
     logger.info(f"Loading... {path}")
-    lightning_module = MyLightningModule.load_from_checkpoint(checkpoint_path=path)
+    lightning_module = SimSiam.load_from_checkpoint(
+        checkpoint_path=path,
+        gpus=1,
+        dataset="stl10",
+        num_samples=128,
+        batch_size=2048,
+    )
+    data_module = MyDataModule(config)
+    data_module.setup(stage="predict")
+    # predict for test dataset
+    trainer = Trainer(
+        max_epochs=epochs if not debug else 1,
+        precision=16 if fp16 else 32,
+        accumulate_grad_batches=1,
+        amp_backend="native",
+        gpus=1,
+        benchmark=False,
+        default_root_dir=os.getcwd(),
+        deterministic=True,
+    )
+
+    test_loader = data_module.get_loader(phase="test")
+    # shape: (num_batch, batch_size), type: List[torch.Tensor]
+    outputs: List[OrderedDict] = trainer.predict(
+        model=lightning_module,
+        dataloaders=test_loader,
+        # datamodule=data_module,
+        return_predictions=True,
+    )
+
+
+
+# =====================
+# Model
+# =====================
+class Atma11Model(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super(Atma11Model, self).__init__()
+        logger.info(f"Loading ... {config.model_name}")
+        model = getattr(resnet, config.model_name)(pretrained=False)
+        model.fc = nn.Linear(512, out_features=config.num_labels, bias=True)
+        for param in model.parameters():
+            param.require_grad = True
+        self.model = model
+
+    def forward(self, x) -> torch.Tensor:
+        # shape: (batch_size, channel, w, h)
+        output = self.model(x)
+        # logger.debug(f"{x.detach().cpu().shape}")
+        return output.view(-1)
+
+
+class MyLightningModule(pl.LightningModule):
+    def __init__(self, cfg: Config) -> None:
+        super(MyLightningModule, self).__init__()
+        self.net = Atma11Model(config=cfg)
+        self.criterion = torch.nn.MSELoss()
+        self.save_hyperparameters()
+        self.optim = cfg.optim
+        self.fold = cfg.fold
+
+    def forward(self, x) -> torch.Tensor:
+        logits = self.net(x)
+        return logits
+
+    def training_step(self, batch: Dict[str, Any], batch_nb: int):
+        # logger.debug(f"batch_nb is {batch_nb}")
+        data = batch["image"]
+        targets = batch["target"]
+        logits = self(data)
+        loss = torch.sqrt(self.criterion(logits, targets))
+        self.log(f"fold{self.fold}_train_loss", loss)
+        wandb.log({f"fold{self.fold}_train_loss": loss.detach().cpu()})
+        return loss
+
+    def validation_step(
+        self, batch: Dict[str, torch.Tensor], batch_nb: int
+    ) -> OrderedDict:
+        # data = images
+        data, targets = batch["image"], batch["target"]
+        logits = self.forward(data)
+        loss = torch.sqrt(self.criterion(logits, targets))
+        self.log(f"fold{self.fold}_val_loss", loss)
+        wandb.log({f"fold{self.fold}_valid_loss": loss.detach().cpu()})
+        output = OrderedDict(
+            {
+                "targets": targets.detach(),
+                "preds": logits.detach(),
+                "loss": loss.detach(),
+            }
+        )
+        return output
+
+    def predict_step(
+        self, batch: Dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int
+    ) -> OrderedDict:
+        data = batch["image"]
+        object_id = batch["object_id"]
+        output = self(data)
+        return OrderedDict({"preds": output, "object_id": object_id})
+
+    def validation_epoch_end(self, outputs):
+        result_dict = dict()
+        result_dict["epoch"] = int(self.current_epoch)
+        result_dict[f"fold{self.fold}_val_loss"] = (
+            torch.stack([out["loss"] for out in outputs]).mean().item()
+        )
+
+        targets = (
+            torch.cat([out["targets"].view(-1) for out in outputs])
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        preds = (
+            torch.cat([out["preds"].view(-1) for out in outputs]).detach().cpu().numpy()
+        )
+
+        # logger.debug(f"targets: {targets.shape}, preds: {preds.shape}")
+        # calc score
+        result_dict[f"fold{self.fold}_v_score"] = score_func(
+            preds=preds, targets=targets
+        )
+        self.log_dict(result_dict, prog_bar=True)
+
+    def configure_optimizers(self) -> Tuple[List[Any], List[Any]]:
+        cfg_optim = self.optim
+        optimizer = make_optimizer(
+            model_params=self.parameters(),
+            name=cfg_optim.optimizer.name,
+            params=cfg_optim.optimizer.params,
+        )
+        scheduler = make_scheduler(
+            optimizer, name=cfg_optim.scheduler.name, params=cfg_optim.scheduler.params
+        )
+        return [optimizer], [scheduler]
+
+
+# =====================
+# Utils
+# =====================
+def score_func(preds: np.ndarray, targets: np.ndarray) -> np.float64:
+    assert targets.shape == preds.shape
+    return np.sqrt((np.sum((preds - targets) ** 2) / len(preds)))
+
+
+def make_optimizer(name: str, model_params, params: Dict[str, Any]) -> optim.Optimizer:
+    logger.info(f"{name}, with {params}")
+    if name == "MADGRAD":
+        optimizer = MADGRAD(model_params, **params)
+    else:
+        optimizer = getattr(optim, name)(params=model_params, **params)
+    return optimizer
+
+
+def make_scheduler(optimizer: optim.Optimizer, name: str, params: Dict[str, Any]):
+    logger.info(f"{name} with {params}")
+    schduler = getattr(lr_scheduler, name)(optimizer, **params)
+    return schduler
+
+
+def make_sub(preds_df: pd.core.frame.DataFrame, n_fold: int, output_dir: str) -> None:
+    sample_path = "./input/atmacup-11/atmaCup#11_sample_submission.csv"
+    sub = pd.read_csv(sample_path)
+
+    # mean average
+    sub["target"] = (
+        np.sum(preds_df[f"fold{fold}_preds"].values for fold in range(n_fold)) / n_fold
+    )
+
+    logger.info(
+        "\n\tSub Summary\n"
+        + "\n\tHead\n\n"
+        + f"{sub.head(5)}\n"
+        + "\n\tDescribe\n\n"
+        + f"{sub.describe()}\n"
+        + "\n\tInfo\n\n"
+        + f"{sub.info()}"
+    )
+    sub.to_csv(f"{output_dir}/submission.csv", index=False)
+
+
+def make_predict(path: str, config: Config) -> Dict[str, np.ndarray]:
+    """ """
+    debug = config.debug
+    fp16 = config.fp16
+    epochs = config.epochs
+
+    logger.info("predict start")
+    logger.info(f"Loading... {path}")
+    lightning_module = SimSiam.load_from_checkpoint(
+        checkpoint_path=path,
+        gpus=1,
+        dataset="stl10",
+        num_samples=128,
+        batch_size=2048,
+    )
     data_module = MyDataModule(config)
     data_module.setup(stage="predict")
     # predict for test dataset
@@ -478,10 +696,13 @@ def train(
     checkpoint = ModelCheckpoint(
         dirpath=str(output_dir),
         filename=f"{expname}_fold{fold}" + "{epoch:02d}",
-        save_weights_only=True,
+        save_weights_only=False,
         save_top_k=None,
-        monitor=f"fold{fold}_v_score",
-        mode="min",
+        monitor="val_loss",
+        mode="max",
+        verbose=False,
+        every_n_train_steps=None,
+        every_n_val_epochs=None,
     )
 
     trainer = Trainer(
@@ -494,15 +715,36 @@ def train(
         default_root_dir=os.getcwd(),
         deterministic=True,
         limit_train_batches=0.1 if config.debug else 1.0,
-        limit_val_batches=0.1 if config.debug else 1.0,
+        limit_val_batches=0.15 if config.debug else 1.0,
         callbacks=[checkpoint],
         logger=loggers,
     )
 
     # training
-    lightning_module = MyLightningModule(config)
+    # If you see more detail, please see this source below
+    # https://github.com/PyTorchLightning/Lightning-Bolts/blob/master/pl_bolts/models/self_supervised/simsiam/simsiam_module.py#L19-L268
     data_module = MyDataModule(config)
-    trainer.fit(lightning_module, datamodule=data_module)
+    ssl_model = SimSiam(
+        gpus=1,
+        dataset="stl10",  # for using as cli . But when we call this model directory, this argument is not used
+        num_samples=128,
+        batch_size=256,
+        optimizer="adam",
+        arch="resnet18",
+        num_workers=4,
+        max_epochs=200 if not config.debug else 1,
+        data_module=data_module,
+        first_conv=True,
+        hidden_mlp=512,
+    )
+    # lightning_module = MyLightningModule(config)
+
+    trainer.fit(
+        ssl_model,
+        data_module,
+        # train_dataloader=data_module.get_loader(phase="train"),
+        # val_dataloaders=[data_module.get_loader(phase="valid")],
+    )
 
     torch.cuda.empty_cache()
     gc.collect()
@@ -512,7 +754,7 @@ def main() -> None:
     config = Config()
 
     # TODO DEBUG
-    config.debug = False
+    # config.debug = True
 
     secret_cfg = utils.get_config()
     runfilepath = Path(__file__)
@@ -538,6 +780,8 @@ def main() -> None:
             config=config,
             fold=fold,
         )
+
+        """
         ckpt = list(Path(".").glob(f"{output_dir}/{expname}_fold{fold}*.ckpt"))[0]
         result = make_predict(path=str(ckpt), config=config)
         result_df = pd.DataFrame(result)
@@ -546,9 +790,10 @@ def main() -> None:
         logger.info("\n\t\t" + "=" * 10 + f"  Fold {fold} end  " + "=" * 10)
         torch.cuda.empty_cache()
         gc.collect()
+        """
 
     # make submission.csv
-    make_sub(preds_df=test_df, n_fold=n_fold, output_dir=str(output_dir))
+    # make_sub(preds_df=test_df, n_fold=n_fold, output_dir=str(output_dir))
 
 
 if __name__ == "__main__":

@@ -8,3 +8,5 @@ output
 *.ipynb
 lightning_logs
 __pycache__
+tmp
+.mypy_cache

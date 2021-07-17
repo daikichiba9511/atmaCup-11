@@ -2,8 +2,8 @@ SHELL=/bin/bash
 POETRY_VERSION=1.1.7
 PACKAGE = loguru wandb flake8 mypy black pyyaml pytorch-lightning jupytext madgrad albumentations lightning-bolts
 
-SKLEARN = pip uninstall -y scikit-learn \
-	&& pip install --pre --extra-index https://pypi.anaconda.org/scipy-wheels-nightly/simple scikit-learn
+SKLEARN = pip3 uninstall -y scikit-learn \
+	&& pip3 install --pre --extra-index https://pypi.anaconda.org/scipy-wheels-nightly/simple scikit-learn
 
 POETRY = curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 - --version ${POETRY_VERSION}\
 		&& echo "export PATH=${HOME}/.poetry/bin:${PATH}" > ~/.bashrc \

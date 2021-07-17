@@ -30,6 +30,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+
 # import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
@@ -39,8 +40,10 @@ from loguru import logger
 from madgrad import MADGRAD
 from PIL import Image
 from pl_bolts.models.self_supervised import SimSiam
-from pl_bolts.models.self_supervised.simclr import (SimCLREvalDataTransform,
-                                                    SimCLRTrainDataTransform)
+from pl_bolts.models.self_supervised.simclr import (
+    SimCLREvalDataTransform,
+    SimCLRTrainDataTransform,
+)
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
@@ -468,7 +471,6 @@ def make_predict(path: str, config: Config) -> Dict[str, np.ndarray]:
     )
 
 
-
 # =====================
 # Model
 # =====================
@@ -680,7 +682,7 @@ def train(
 ) -> None:
     seed_everything(config.seed)
     config.fold = fold
-
+    """
     wandb_logger = WandbLogger(
         name=expname,
         save_dir=str(config.output_dir),
@@ -688,7 +690,9 @@ def train(
         entity=secret_cfg.entity,
         log_model=False,
     )
-    loggers = [wandb_logger]
+    """
+    # loggers = [wandb_logger]
+    loggers = None
 
     checkpoint = ModelCheckpoint(
         dirpath=str(output_dir),
@@ -743,6 +747,7 @@ def train(
         # val_dataloaders=[data_module.get_loader(phase="valid")],
     )
 
+    torch.save(ssl_model.online_network.encoder.state_dict(), f"model{fold}.pt")
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -762,7 +767,8 @@ def main() -> None:
     config.output_dir = output_dir
     logger.info(f"project: {secret_cfg.prj_name}, name: {secret_cfg.entity}")
     if config.is_logging:
-        wandb.login(key=secret_cfg.wandb_token)
+        print("login skipped")
+        # wandb.login(key=secret_cfg.wandb_token)
 
     logger.info(f"Settingns:\n\t{asdict(config)}")
 

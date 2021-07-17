@@ -4,6 +4,7 @@
 * Simsiam
 * resnet18 finetuning
 * epoch 60
+* stratified group k-fold
 
 Reference
 
@@ -118,7 +119,7 @@ class Config:
             # name="AdamW",
             # params={"lr": 1e-3},
             name="MADGRAD",
-            params={"lr": 1e-2, "eps": 1e-6, "weight_decay": 5e-4},
+            params={"lr": 1e-3, "eps": 1e-6, "weight_decay": 5e-4},
         ),
         scheduler=SchedulerCfg(
             name="CosineAnnealingLR",
@@ -235,11 +236,12 @@ class MyDataModule(pl.LightningDataModule):
         train = pd.read_csv(self.train_path)
         train["fold"] = -1
         # split
-        kf = model_selection.StratifiedKFold(
+        kf = model_selection.StratifiedGroupKFold(
             n_splits=self.n_fold, shuffle=True, random_state=self.seed
         )
+        groups = train["art_series_id"].values
         for fold_i, (train_idx, valid_idx) in enumerate(
-            kf.split(train, train[self.target_col])
+            kf.split(train, train[self.target_col], groups)
         ):
             train.loc[valid_idx, "fold"] = int(fold_i)
         train["fold"] = train["fold"].astype(int)
@@ -316,7 +318,7 @@ class Atma11Model(nn.Module):
             logger.debug(f"\n{self.model}")
 
         # for param in self.model.parameters():
-            # param.require_grad = True
+        # param.require_grad = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # shape of x: (batch_size, channel, w, h)

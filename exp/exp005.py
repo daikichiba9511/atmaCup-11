@@ -118,7 +118,7 @@ class Config:
             # name="AdamW",
             # params={"lr": 1e-3},
             name="MADGRAD",
-            params={"lr": 1e-3, "eps": 1e-6, "weight_decay": 5e-4},
+            params={"lr": 1e-2, "eps": 1e-6, "weight_decay": 5e-4},
         ),
         scheduler=SchedulerCfg(
             name="CosineAnnealingLR",
@@ -181,6 +181,7 @@ class Atma11Dataset(Dataset):
         elif self.is_test:
             return A.Compose(
                 [
+                    A.Resize(width=self.size[0], height=self.size[1], p=1.0),
                     ToTensorV2(),
                 ]
             )
@@ -199,15 +200,10 @@ class Atma11Dataset(Dataset):
         return A.Compose(
             [
                 A.Resize(width=self.size[0], height=self.size[1], p=1.0),
-                A.OneOf(
-                    [
-                        A.HorizontalFlip(),
-                        A.VerticalFlip(),
-                        A.ShiftScaleRotate(),
-                    ],
-                    p=0.6,
-                ),
-                A.Cutout(num_holes=8, max_h_size=64, max_w_size=64, p=0.5),
+                A.HorizontalFlip(p=0.5),
+                A.VerticalFlip(p=0.5),
+                A.ShiftScaleRotate(p=0.5),
+                # A.Cutout(num_holes=8, max_h_size=64, max_w_size=64, p=0.5),
                 ToTensorV2(),
             ]
         )
@@ -312,18 +308,19 @@ class Atma11Model(nn.Module):
         if model_state is not None:
             self.model.load_state_dict(model_state)
         self.model.fc = nn.Sequential(
-            nn.Linear(in_features=512, out_features=32, bias=True),
-            nn.Dropout(0.4),
-            nn.Linear(in_features=32, out_features=config.num_labels, bias=True),
+            # nn.Linear(in_features=512, out_features=32, bias=True),
+            # nn.Dropout(0.3),
+            nn.Linear(in_features=512, out_features=config.num_labels, bias=True),
         )
         if config.debug:
             logger.debug(f"\n{self.model}")
-        for param in self.model.parameters():
-            param.require_grad = True
+
+        # for param in self.model.parameters():
+            # param.require_grad = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # shape of x: (batch_size, channel, w, h)
-        output = self.model(x).squeeze(1)
+        output = self.model(x).view(-1)
         # logger.debug(f"{x.detach().cpu().shape}, {output.shape}")
         return output
 
@@ -519,7 +516,7 @@ def train(
     secret_cfg,
     config: Config,
     output_dir: Path,
-) -> None:
+) -> Dict[str, Any]:
     seed_everything(config.seed)
     config.fold = fold
 
@@ -580,8 +577,6 @@ def train(
         hidden_mlp=512,
     )
     state = ssl_model.online_network.encoder.state_dict()
-    model = resnet.resnet18(pretrained=False)
-    model.load_state_dict(state)
     data_module = MyDataModule(config)
     lightning_module = MyLightningModule(config, model_state=state)
 
@@ -627,12 +622,12 @@ def main() -> None:
             config=config,
             fold=fold,
         )
-
-        result = make_predict(config=config)
+        result = make_predict(config)
         result_df = pd.DataFrame(result)
         result_df = result_df.rename(columns={"preds": f"fold{fold}_preds"})
         test_df = pd.merge(left=test_df, right=result_df, on="object_id", how="left")
         logger.info("\n\t\t" + "=" * 10 + f"  Fold {fold} end  " + "=" * 10)
+
         torch.cuda.empty_cache()
         gc.collect()
 

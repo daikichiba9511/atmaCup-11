@@ -105,7 +105,7 @@ class Config:
     fold: int = 0
     n_fold: int = 5
     epochs: int = 20
-    batch_size: int = 8 * 8 * 2
+    batch_size: int = 256
     fp16: bool = False
     img_size: Tuple[int, int] = (224, 224)
     train_batch_size: int = 512
@@ -118,7 +118,7 @@ class Config:
             # name="AdamW",
             # params={"lr": 1e-3},
             name="MADGRAD",
-            params={"lr": 1e-2, "eps": 1e-6, "weight_decay": 5e-4},
+            params={"lr": 1e-4, "eps": 1e-6, "weight_decay": 5e-4},
         ),
         scheduler=SchedulerCfg(
             name="CosineAnnealingLR",
@@ -316,7 +316,7 @@ class Atma11Model(nn.Module):
             logger.debug(f"\n{self.model}")
 
         # for param in self.model.parameters():
-            # param.require_grad = True
+        # param.require_grad = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # shape of x: (batch_size, channel, w, h)
@@ -561,9 +561,7 @@ def train(
     # https://github.com/PyTorchLightning/Lightning-Bolts/blob/master/pl_bolts/models/self_supervised/simsiam/simsiam_module.py#L19-L268
     batch_size = 512
     logger.debug(f"fold{config.fold} train batch size is loaded {batch_size}")
-    ckpt_path = list(
-        Path("output/exp002").glob(f"exp002_fold{config.fold}epoch*.ckpt")
-    )[0]
+    ckpt_path = list(Path("output/exp006").glob("exp006_fold0epoch*.ckpt"))[0]
     ssl_model = SimSiam.load_from_checkpoint(
         checkpoint_path=str(ckpt_path),
         gpus=1,

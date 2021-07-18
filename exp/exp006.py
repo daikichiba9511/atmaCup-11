@@ -700,7 +700,7 @@ def train(
         save_weights_only=False,
         save_top_k=None,
         monitor="val_loss",
-        mode="max",
+        mode="min",
         verbose=False,
         every_n_train_steps=None,
         every_n_val_epochs=None,
@@ -747,7 +747,7 @@ def train(
         # val_dataloaders=[data_module.get_loader(phase="valid")],
     )
 
-    torch.save(ssl_model.online_network.encoder.state_dict(), f"model{fold}.pt")
+    torch.save(ssl_model.online_network.encoder.state_dict(), f"output/{expname}/model{fold}.pt")
     torch.cuda.empty_cache()
     gc.collect()
 

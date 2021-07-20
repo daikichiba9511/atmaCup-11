@@ -1,14 +1,16 @@
-""" exp015
+""" exp016
 
 * Self-Supervised Learning by lightning bolts
 * Simsiam
 * resnet18 finetuning
 * epoch 30
 * stratified group k-fold
+* batch_size 320
+* img_size 224
 * augmentations
-    * RandomResizedCrop
+    * ResizedCrop
 * using pretrained exp010_fold1epoch*.ckpt
-* lr=1e-4 . While training, to save pretrained params
+* lr=5e-3
 
 Reference
 
@@ -110,7 +112,7 @@ class Config:
     fold: int = 0
     n_fold: int = 5
     epochs: int = 30
-    batch_size: int = 256
+    batch_size: int = 320
     fp16: bool = False
     img_size: Tuple[int, int] = (224, 224)
     train_batch_size: int = 512
@@ -121,9 +123,9 @@ class Config:
     optim = OptimConfig(
         optimizer=OptimizerCfg(
             name="AdamW",
-            params={"lr": 1e-4, "weight_decay": 5e-5},
+            params={"lr": 5e-3},
             # name="MADGRAD",
-            # params={"lr": 1e-3, "eps": 1e-6, "weight_decay": 5e-4},
+            # params={"lr": 1e-3, "eps": 1e-6, "weight_decay": 1e-6},
         ),
         scheduler=SchedulerCfg(
             name="CosineAnnealingLR",
@@ -204,8 +206,8 @@ class Atma11Dataset(Dataset):
             )
         return A.Compose(
             [
-                # A.Resize(width=self.size[0], height=self.size[1], p=1.0),
-                A.RandomResizedCrop(width=self.size[0], height=self.size[1]),
+                A.Resize(width=self.size[0], height=self.size[1], p=1.0),
+                # A.RandomResizedCrop(width=self.size[0], height=self.size[1], p=0.5),
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
                 A.ShiftScaleRotate(p=0.5),
@@ -315,7 +317,7 @@ class Atma11Model(nn.Module):
         if model_state is not None:
             self.model.load_state_dict(model_state)
         self.model.fc = nn.Sequential(
-            # nn.Linear(in_features=512, out_features=32, bias=True),
+            # nn.Linear(in_features=512, out_features=256, bias=True),
             # nn.Dropout(0.3),
             nn.Linear(in_features=512, out_features=config.num_labels, bias=True),
         )
@@ -568,9 +570,7 @@ def train(
     # https://github.com/PyTorchLightning/Lightning-Bolts/blob/master/pl_bolts/models/self_supervised/simsiam/simsiam_module.py#L19-L268
     batch_size = 512
     logger.debug(f"fold{config.fold} train batch size is loaded {batch_size}")
-    ckpt_path = list(
-        Path("output/exp010").glob(f"exp010_fold1epoch*.ckpt")
-    )[0]
+    ckpt_path = list(Path("output/exp010").glob(f"exp010_fold1epoch*.ckpt"))[0]
     ssl_model = SimSiam.load_from_checkpoint(
         checkpoint_path=str(ckpt_path),
         gpus=1,

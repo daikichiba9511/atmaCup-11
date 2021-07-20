@@ -13,3 +13,5 @@ tmp
 cloudflared*
 
 model*.pt
+checkpoints/
+*.ckpt

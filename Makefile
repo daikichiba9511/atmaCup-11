@@ -1,6 +1,7 @@
 SHELL=/bin/bash
 POETRY_VERSION=1.1.7
-PACKAGE = loguru wandb flake8 mypy black pyyaml pytorch-lightning jupytext madgrad albumentations lightning-bolts
+PACKAGE = loguru wandb flake8 mypy black pyyaml pytorch-lightning \
+		jupytext madgrad albumentations lightning-bolts timm lightly
 
 SKLEARN = pip3 uninstall -y scikit-learn \
 	&& pip3 install --pre --extra-index https://pypi.anaconda.org/scipy-wheels-nightly/simple scikit-learn

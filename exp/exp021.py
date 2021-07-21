@@ -1,4 +1,4 @@
-""" exp020
+""" exp029
 
 * Self-Supervised Learning by lightning bolts
 * Simsiam
@@ -105,14 +105,13 @@ class Config:
     # model params
     model_name = "resnet18"
     models_params = None
-    freeze_embed: bool = False
 
     # Train strategy
     target_col: str = "target"
     num_labels: int = 1
     fold: int = 0
     n_fold: int = 5
-    epochs: int = 100
+    epochs: int = 20
     batch_size: int = 320
     fp16: bool = False
     img_size: Tuple[int, int] = (224, 224)
@@ -123,10 +122,10 @@ class Config:
 
     optim = OptimConfig(
         optimizer=OptimizerCfg(
-            # name="AdamW",
-            # params={"lr": 1e-3},
-            name="MADGRAD",
-            params={"lr": 1e-2, "eps": 1e-6, "weight_decay": 1e-6},
+            name="AdamW",
+            params={"lr": 1e-3},
+            # name="MADGRAD",
+            # params={"lr": 1e-3, "eps": 1e-6, "weight_decay": 1e-6},
         ),
         scheduler=SchedulerCfg(
             name="CosineAnnealingLR",
@@ -209,7 +208,7 @@ class Atma11Dataset(Dataset):
         return A.Compose(
             [
                 A.Resize(width=self.size[0], height=self.size[1], p=1.0),
-                A.RandomResizedCrop(width=self.size[0], height=self.size[1], p=0.5),
+                # A.RandomResizedCrop(width=self.size[0], height=self.size[1], p=0.5),
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
                 A.ShiftScaleRotate(p=0.5),
@@ -318,11 +317,10 @@ class Atma11Model(nn.Module):
         self.model = resnet.resnet18(pretrained=False)
         if model_state is not None:
             self.model.load_state_dict(model_state)
-            if config.freeze_embed:
-                for param in self.model.parameters():
-                    param.requires_grad = False
+            for param in self.model.parameters():
+                param.requires_grad = False
         self.model.fc = nn.Sequential(
-            nn.Linear(in_features=512, out_features=256, bias=True),
+            nn.Linear(in_features=self.model.in_feature, out_features=256, bias=True),
             nn.Dropout(0.5),
             nn.Linear(in_features=256, out_features=config.num_labels, bias=True),
         )

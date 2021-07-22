@@ -1,4 +1,6 @@
-""" exp022
+"""exp023
+
+exp022のバックアップ
 
 * Self-Supervised Learning by lightly
 * Simsiam

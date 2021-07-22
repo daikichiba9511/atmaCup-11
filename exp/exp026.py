@@ -1,10 +1,10 @@
-""" exp022
+"""exp023
 
 * Self-Supervised Learning by lightly
 * Simsiam
 * epoch 400
 * batch size 320
-* backbone is vit small
+* backbone is resnet18d
 
 * https://arxiv.org/abs/2011.10566
 * https://github.com/PyTorchLightning/Lightning-Bolts/blob/master/pl_bolts/models/self_supervised/simsiam/simsiam_module.py#L19-L268
@@ -33,6 +33,7 @@ import pytorch_lightning as pl
 import timm
 import torch
 import torch.nn as nn
+
 # import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
@@ -42,8 +43,10 @@ from loguru import logger
 from madgrad import MADGRAD
 from PIL import Image
 from pl_bolts.models.self_supervised import SimSiam
-from pl_bolts.models.self_supervised.simclr import (SimCLREvalDataTransform,
-                                                    SimCLRTrainDataTransform)
+from pl_bolts.models.self_supervised.simclr import (
+    SimCLREvalDataTransform,
+    SimCLRTrainDataTransform,
+)
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
@@ -77,7 +80,7 @@ class Config:
     target_col: str = "target"
     fp16: bool = True
     img_size: Tuple[int, int] = (224, 224)
-    batch_size: int = 64
+    batch_size: int = 400
     epochs: int = 400
     fold: int = 0
     n_fold: int = 5
@@ -88,8 +91,8 @@ class Config:
     # ssl by lightly
     # dimension of the embedding
     outdim: int = 512
-    backbone_model_name: str = "vit_small_patch16_224"
-    num_ftrs = 75264
+    backbone_model_name: str = "resnet18d"
+    num_ftrs = 512
     num_mlp_layers = 2
 
 
@@ -245,11 +248,11 @@ class MyLitModel(pl.LightningModule):
         # prepare network
         self.out_dim = cfg.outdim
         backbone_model = timm.create_model(self.backbone_model_name, pretrained=False)
-        self.backbone = nn.Sequential(
+        backbone = nn.Sequential(
             *list(backbone_model.children())[:-1]
         )  # drop last fc layer
         self.model = lightly.models.SimSiam(
-            self.backbone,
+            backbone,
             num_ftrs=self.num_ftrs,
         )
 

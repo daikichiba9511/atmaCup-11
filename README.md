@@ -14,7 +14,7 @@ I and many others tried Simsiam to get pretrained weight, but I guess that we al
 
 I choosed two sub that are result of exp013 , result which is ensemble of exp013, exp016, exp024 as last submision
 
-I tried to do below.
+I tried below.
 
 * resnet18d
 * vit

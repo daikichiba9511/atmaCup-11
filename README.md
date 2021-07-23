@@ -56,3 +56,13 @@ tree -L 2
 │   ├── __init__.py
 │   └── utils.py # this module to load my credentials, so not uploaded
 ```
+
+## prerequire
+
+```shell
+# register name and email in git, and copy credentials under this repository like ssh credentials
+make config
+
+# install package to run exp files
+make develop
+```

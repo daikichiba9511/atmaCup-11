@@ -64,9 +64,7 @@ from src import utils
 @dataclass
 class Config:
     is_logging: bool = True
-    # is_logging: bool = False
     debug: bool = False
-    # debug: bool = True
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     num_workers: int = 4
     seed: int = 42
@@ -85,7 +83,7 @@ class Config:
     fold: int = 0
     n_fold: int = 5
     # lr: float = 0.05 * batch_size / 256
-    lr: float = 1e-5
+    lr: float = 1e-3
     T_max: int = epochs
     freeze_embed: bool = True
 
@@ -171,7 +169,7 @@ class Atma11Dataset(Dataset):
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
                 A.ShiftScaleRotate(p=0.5),
-                # A.Cutout(num_holes=8, max_h_size=64, max_w_size=64, p=0.5),
+                A.Cutout(num_holes=8, max_h_size=64, max_w_size=64, p=0.5),
                 ToTensorV2(),
             ]
         )
@@ -358,7 +356,7 @@ class FineTuningModel(pl.LightningModule):
         # logger.debug(f"\n{model}")
 
     def forward(self, data) -> Any:
-        return self.model(data).mean(1)
+        return self.model(data).mean(dim=1)
 
     def training_step(self, batch, batch_idx):
         image = batch["image"]
@@ -375,6 +373,7 @@ class FineTuningModel(pl.LightningModule):
         # data = images
         data, targets = batch["image"], batch["target"]
         logits = self.forward(data)
+        # logger.debug(f"shape of logits {logits.shape}")
         loss = torch.sqrt(self.criterion(logits, targets))
         # self.log(f"fold{self.fold}_val_loss", loss)
         wandb.log({f"fold{self.fold}_valid_loss": loss.detach().cpu()})
@@ -535,9 +534,12 @@ def main():
             if config.debug:
                 logger.info(f"\n{model}")
             custom_head = torch.nn.Sequential(
-                # MLP(input_dim=384, hidden_size=196, output_dim=384 * 2),
-                # MLP(input_dim=384 * 2, hidden_size=196, output_dim=384),
+                MLP(input_dim=384, hidden_size=196, output_dim=384 * 2),
+                MLP(input_dim=384 * 2, hidden_size=196, output_dim=384),
                 MLP(input_dim=384, hidden_size=196, output_dim=1),
+                # torch.nn.Linear(in_features=384, out_features=384 * 10),
+                # torch.nn.Dropout(0.5),
+                # torch.nn.Linear(in_features=384 * 10, out_features=1),
             )
             model.add_module("head", custom_head)
             del pretrained_lit_module
@@ -552,6 +554,7 @@ def main():
         ckpt_path = list(
             Path(f"./output/{expname}").glob(f"{expname}_fold{fold}epoch*.ckpt")
         )[0]
+        logger.info(f"Loading ckpt ... \n\t{ckpt_path}")
         fine_lit_model = FineTuningModel.load_from_checkpoint(ckpt_path)
         test_dataloader = data_module.get_loader(phase="test")
         outputs = trainer.predict(
